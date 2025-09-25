@@ -14,6 +14,7 @@ type updateData struct {
 	PlaceholderFormat PlaceholderFormat
 	RunWith           BaseRunner
 	Prefixes          []Sqlizer
+	CTEs              []Sqlizer
 	Table             string
 	SetClauses        []setClause
 	From              Sqlizer
@@ -72,6 +73,15 @@ func (d *updateData) ToSql() (sqlStr string, args []interface{}, err error) {
 			return
 		}
 
+		sql.WriteString(" ")
+	}
+
+	if len(d.CTEs) > 0 {
+		sql.WriteString("WITH ")
+		args, err = appendToSql(d.CTEs, sql, ", ", args)
+		if err != nil {
+			return
+		}
 		sql.WriteString(" ")
 	}
 
@@ -285,4 +295,20 @@ func (b UpdateBuilder) Suffix(sql string, args ...interface{}) UpdateBuilder {
 // SuffixExpr adds an expression to the end of the query
 func (b UpdateBuilder) SuffixExpr(expr Sqlizer) UpdateBuilder {
 	return builder.Append(b, "Suffixes", expr).(UpdateBuilder)
+}
+
+// With adds a CTE to the query.
+func (b UpdateBuilder) With(alias string, expr Sqlizer) UpdateBuilder {
+	return b.WithCTE(CTE{Alias: alias, ColumnList: []string{}, Recursive: false, Expression: expr})
+}
+
+// WithRecursive adds a recursive CTE to the query.
+func (b UpdateBuilder) WithRecursive(alias string, expr Sqlizer) UpdateBuilder {
+	return b.WithCTE(CTE{Alias: alias, ColumnList: []string{}, Recursive: true, Expression: expr})
+}
+
+// WithCTE adds an arbitrary Sqlizer to the query.
+// The sqlizer will be sandwiched between the keyword WITH and, if there's more than one CTE, a comma.
+func (b UpdateBuilder) WithCTE(cte Sqlizer) UpdateBuilder {
+	return builder.Append(b, "CTEs", cte).(UpdateBuilder)
 }

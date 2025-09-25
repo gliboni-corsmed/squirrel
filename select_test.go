@@ -277,6 +277,8 @@ func TestSelectSubqueryInConjunctionPlaceholderNumbering(t *testing.T) {
 	expectedSql := "SELECT * WHERE (EXISTS( SELECT a WHERE b = $1 )) AND c = $2"
 	assert.Equal(t, expectedSql, sql)
 	assert.Equal(t, []interface{}{1, 2}, args)
+}
+
 func TestOneCTE(t *testing.T) {
 	sql, _, err := Select("*").From("cte").With("cte", Select("abc").From("def")).ToSql()
 

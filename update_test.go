@@ -47,6 +47,77 @@ func TestUpdateBuilderToSqlErr(t *testing.T) {
 	assert.Error(t, err)
 }
 
+func TestUpdateBuilderWithCTE(t *testing.T) {
+	sql, args, err := Update("users").
+		With("cte", Select("id").From("active_users")).
+		Set("status", "updated").
+		Where("id IN (SELECT id FROM cte)").
+		ToSql()
+
+	assert.NoError(t, err)
+	expectedSql := "WITH cte AS (SELECT id FROM active_users) UPDATE users SET status = ? WHERE id IN (SELECT id FROM cte)"
+	assert.Equal(t, expectedSql, sql)
+	assert.Equal(t, []interface{}{"updated"}, args)
+}
+
+func TestUpdateBuilderWithMultipleCTEs(t *testing.T) {
+	sql, args, err := Update("users").
+		With("active_cte", Select("id").From("active_users")).
+		With("inactive_cte", Select("id").From("inactive_users")).
+		Set("status", "processed").
+		Where("id IN (SELECT id FROM active_cte) OR id IN (SELECT id FROM inactive_cte)").
+		ToSql()
+
+	assert.NoError(t, err)
+	expectedSql := "WITH active_cte AS (SELECT id FROM active_users), inactive_cte AS (SELECT id FROM inactive_users) UPDATE users SET status = ? WHERE id IN (SELECT id FROM active_cte) OR id IN (SELECT id FROM inactive_cte)"
+	assert.Equal(t, expectedSql, sql)
+	assert.Equal(t, []interface{}{"processed"}, args)
+}
+
+func TestUpdateBuilderWithRecursiveCTE(t *testing.T) {
+	sql, args, err := Update("categories").
+		WithRecursive("category_tree", Select("id", "parent_id").From("categories").Where("parent_id IS NULL")).
+		Set("level", 1).
+		Where("id IN (SELECT id FROM category_tree)").
+		ToSql()
+
+	assert.NoError(t, err)
+	expectedSql := "WITH RECURSIVE category_tree AS (SELECT id, parent_id FROM categories WHERE parent_id IS NULL) UPDATE categories SET level = ? WHERE id IN (SELECT id FROM category_tree)"
+	assert.Equal(t, expectedSql, sql)
+	assert.Equal(t, []interface{}{1}, args)
+}
+
+func TestUpdateBuilderWithCTEAndComplexQuery(t *testing.T) {
+	cte := CTE{
+		Alias:      "user_stats",
+		ColumnList: []string{"user_id", "total_orders"},
+		Recursive:  false,
+		Expression: Select("user_id", "COUNT(*)").From("orders").GroupBy("user_id"),
+	}
+
+	sql, args, err := Update("users").
+		WithCTE(cte).
+		Set("order_count", Expr("(SELECT total_orders FROM user_stats WHERE user_stats.user_id = users.id)")).
+		Set("last_updated", "NOW()").
+		Where("EXISTS (SELECT 1 FROM user_stats WHERE user_stats.user_id = users.id)").
+		ToSql()
+
+	assert.NoError(t, err)
+	expectedSql := "WITH user_stats(user_id, total_orders) AS (SELECT user_id, COUNT(*) FROM orders GROUP BY user_id) UPDATE users SET order_count = (SELECT total_orders FROM user_stats WHERE user_stats.user_id = users.id), last_updated = ? WHERE EXISTS (SELECT 1 FROM user_stats WHERE user_stats.user_id = users.id)"
+	assert.Equal(t, expectedSql, sql)
+	assert.Equal(t, []interface{}{"NOW()"}, args)
+}
+
+func TestUpdateBuilderCTEErrorBubblesUp(t *testing.T) {
+	// a SELECT with no columns raises an error
+	_, _, err := Update("users").
+		With("cte", SelectBuilder{}.From("test")).
+		Set("x", 1).
+		ToSql()
+
+	assert.Error(t, err)
+}
+
 func TestUpdateBuilderMustSql(t *testing.T) {
 	defer func() {
 		if r := recover(); r == nil {
