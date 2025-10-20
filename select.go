@@ -14,12 +14,11 @@ type selectData struct {
 	RunWith           BaseRunner
 	Prefixes          []Sqlizer
 	CTEs              []Sqlizer
-	Union             Sqlizer
-	UnionAll          Sqlizer
 	Options           []string
 	Columns           []Sqlizer
 	From              Sqlizer
 	Joins             []Sqlizer
+	Compounds         []Sqlizer
 	WhereParts        []Sqlizer
 	GroupBys          []string
 	HavingParts       []Sqlizer
@@ -112,22 +111,6 @@ func (d *selectData) toSqlRaw() (sqlStr string, args []interface{}, err error) {
 		}
 	}
 
-	if d.Union != nil {
-		sql.WriteString(" UNION ")
-		args, err = appendToSql([]Sqlizer{d.Union}, sql, "", args)
-		if err != nil {
-			return
-		}
-	}
-
-	if d.UnionAll != nil {
-		sql.WriteString(" UNION ALL ")
-		args, err = appendToSql([]Sqlizer{d.UnionAll}, sql, "", args)
-		if err != nil {
-			return
-		}
-	}
-
 	if len(d.Joins) > 0 {
 		sql.WriteString(" ")
 		args, err = appendToSql(d.Joins, sql, " ", args)
@@ -152,6 +135,14 @@ func (d *selectData) toSqlRaw() (sqlStr string, args []interface{}, err error) {
 	if len(d.HavingParts) > 0 {
 		sql.WriteString(" HAVING ")
 		args, err = appendToSql(d.HavingParts, sql, " AND ", args)
+		if err != nil {
+			return
+		}
+	}
+
+	if len(d.Compounds) > 0 {
+		sql.WriteString(" ")
+		args, err = appendToSql(d.Compounds, sql, " ", args)
 		if err != nil {
 			return
 		}
@@ -195,6 +186,111 @@ type SelectBuilder builder.Builder
 
 func init() {
 	builder.Register(SelectBuilder{}, selectData{})
+}
+
+type selectJoinPart struct {
+	joinType string
+	target   Sqlizer
+	alias    string
+	onClause interface{}
+	onArgs   []interface{}
+}
+
+func newSelectJoinPart(joinType string, sel SelectBuilder, alias string, onClause interface{}, onArgs []interface{}) selectJoinPart {
+	sel = sel.PlaceholderFormat(Question)
+	return selectJoinPart{
+		joinType: joinType,
+		target:   Alias(sel, alias),
+		alias:    alias,
+		onClause: onClause,
+		onArgs:   onArgs,
+	}
+}
+
+func (p selectJoinPart) ToSql() (string, []interface{}, error) {
+	if strings.TrimSpace(p.joinType) == "" {
+		return "", nil, fmt.Errorf("join type must not be empty")
+	}
+	if strings.TrimSpace(p.alias) == "" {
+		return "", nil, fmt.Errorf("join alias must not be empty")
+	}
+
+	targetSql, targetArgs, err := nestedToSql(p.target)
+	if err != nil {
+		return "", nil, err
+	}
+
+	sql := p.joinType + " " + targetSql
+	args := targetArgs
+
+	if p.onClause == nil {
+		if len(p.onArgs) > 0 {
+			return "", nil, fmt.Errorf("join ON clause arguments provided without an ON clause")
+		}
+		return sql, args, nil
+	}
+
+	var onSql string
+	var onArgs []interface{}
+
+	switch on := p.onClause.(type) {
+	case string:
+		if strings.TrimSpace(on) == "" {
+			if len(p.onArgs) > 0 {
+				return "", nil, fmt.Errorf("join ON clause arguments provided without an ON clause")
+			}
+			return sql, args, nil
+		}
+		onSqlizer := Expr(on, p.onArgs...)
+		onSql, onArgs, err = onSqlizer.ToSql()
+		if err != nil {
+			return "", nil, err
+		}
+	case Sqlizer:
+		if len(p.onArgs) > 0 {
+			return "", nil, fmt.Errorf("join ON clause arguments must be empty when ON clause is a Sqlizer")
+		}
+		onSql, onArgs, err = nestedToSql(on)
+		if err != nil {
+			return "", nil, err
+		}
+	default:
+		return "", nil, fmt.Errorf("unsupported join ON clause type %T", p.onClause)
+	}
+
+	if onSql != "" {
+		sql += " ON " + onSql
+		args = append(args, onArgs...)
+	}
+
+	return sql, args, nil
+}
+
+type compoundSelectPart struct {
+	operator string
+	query    SelectBuilder
+}
+
+func newCompoundSelectPart(operator string, sel SelectBuilder) compoundSelectPart {
+	sel = sel.PlaceholderFormat(Question)
+	return compoundSelectPart{
+		operator: operator,
+		query:    sel,
+	}
+}
+
+func (p compoundSelectPart) ToSql() (string, []interface{}, error) {
+	if strings.TrimSpace(p.operator) == "" {
+		return "", nil, fmt.Errorf("compound operator must not be empty")
+	}
+	sql, args, err := nestedToSql(p.query)
+	if err != nil {
+		return "", nil, err
+	}
+	if strings.TrimSpace(sql) == "" {
+		return "", nil, fmt.Errorf("compound SELECT must not be empty")
+	}
+	return p.operator + " " + sql, args, nil
 }
 
 // Format methods
@@ -316,7 +412,8 @@ func (b SelectBuilder) RemoveColumns() SelectBuilder {
 // Column adds a result column to the query.
 // Unlike Columns, Column accepts args which will be bound to placeholders in
 // the columns string, for example:
-//   Column("IF(col IN ("+squirrel.Placeholders(3)+"), 1, 0) as col", 1, 2, 3)
+//
+//	Column("IF(col IN ("+squirrel.Placeholders(3)+"), 1, 0) as col", 1, 2, 3)
 func (b SelectBuilder) Column(column interface{}, args ...interface{}) SelectBuilder {
 	return builder.Append(b, "Columns", newPart(column, args...)).(SelectBuilder)
 }
@@ -333,18 +430,16 @@ func (b SelectBuilder) FromSelect(from SelectBuilder, alias string) SelectBuilde
 	return builder.Set(b, "From", Alias(from, alias)).(SelectBuilder)
 }
 
-// UnionSelect sets a union SelectBuilder which removes duplicate rows
-// --> UNION combines the result from multiple SELECT statements into a single result set
-func (b SelectBuilder) UnionSelect(union SelectBuilder) SelectBuilder {
-	union = union.PlaceholderFormat(Question)
-	return builder.Set(b, "Union", union).(SelectBuilder)
+// UnionSelect sets one or more union SelectBuilders which remove duplicate rows.
+// --> UNION combines the result from multiple SELECT statements into a single result set.
+func (b SelectBuilder) UnionSelect(unions ...SelectBuilder) SelectBuilder {
+	return b.unionSelectWithType("UNION", unions...)
 }
 
-// UnionAllSelect sets a union SelectBuilder which includes all matching rows
-// --> UNION combines the result from multiple SELECT statements into a single result set
-func (b SelectBuilder) UnionAllSelect(union SelectBuilder) SelectBuilder {
-	union = union.PlaceholderFormat(Question)
-	return builder.Set(b, "UnionAll", union).(SelectBuilder)
+// UnionAllSelect sets one or more union SelectBuilders which include duplicate rows.
+// --> UNION ALL combines the result from multiple SELECT statements into a single result set.
+func (b SelectBuilder) UnionAllSelect(unions ...SelectBuilder) SelectBuilder {
+	return b.unionSelectWithType("UNION ALL", unions...)
 }
 
 // JoinClause adds a join clause to the query.
@@ -357,9 +452,19 @@ func (b SelectBuilder) Join(join string, rest ...interface{}) SelectBuilder {
 	return b.JoinClause("JOIN "+join, rest...)
 }
 
+// JoinSelect adds a JOIN clause that wraps the provided SelectBuilder as a subquery with an alias and ON clause.
+func (b SelectBuilder) JoinSelect(sel SelectBuilder, alias string, onClause interface{}, args ...interface{}) SelectBuilder {
+	return b.JoinClause(newSelectJoinPart("JOIN", sel, alias, onClause, args))
+}
+
 // LeftJoin adds a LEFT JOIN clause to the query.
 func (b SelectBuilder) LeftJoin(join string, rest ...interface{}) SelectBuilder {
 	return b.JoinClause("LEFT JOIN "+join, rest...)
+}
+
+// LeftJoinSelect adds a LEFT JOIN clause that wraps the provided SelectBuilder as a subquery with an alias and ON clause.
+func (b SelectBuilder) LeftJoinSelect(sel SelectBuilder, alias string, onClause interface{}, args ...interface{}) SelectBuilder {
+	return b.JoinClause(newSelectJoinPart("LEFT JOIN", sel, alias, onClause, args))
 }
 
 // RightJoin adds a RIGHT JOIN clause to the query.
@@ -367,9 +472,19 @@ func (b SelectBuilder) RightJoin(join string, rest ...interface{}) SelectBuilder
 	return b.JoinClause("RIGHT JOIN "+join, rest...)
 }
 
+// RightJoinSelect adds a RIGHT JOIN clause that wraps the provided SelectBuilder as a subquery with an alias and ON clause.
+func (b SelectBuilder) RightJoinSelect(sel SelectBuilder, alias string, onClause interface{}, args ...interface{}) SelectBuilder {
+	return b.JoinClause(newSelectJoinPart("RIGHT JOIN", sel, alias, onClause, args))
+}
+
 // InnerJoin adds a INNER JOIN clause to the query.
 func (b SelectBuilder) InnerJoin(join string, rest ...interface{}) SelectBuilder {
 	return b.JoinClause("INNER JOIN "+join, rest...)
+}
+
+// InnerJoinSelect adds an INNER JOIN clause that wraps the provided SelectBuilder as a subquery with an alias and ON clause.
+func (b SelectBuilder) InnerJoinSelect(sel SelectBuilder, alias string, onClause interface{}, args ...interface{}) SelectBuilder {
+	return b.JoinClause(newSelectJoinPart("INNER JOIN", sel, alias, onClause, args))
 }
 
 // CrossJoin adds a CROSS JOIN clause to the query.
@@ -379,12 +494,23 @@ func (b SelectBuilder) CrossJoin(join string, rest ...interface{}) SelectBuilder
 
 // Union adds UNION to the query. (duplicate rows are removed)
 func (b SelectBuilder) Union(join string, rest ...interface{}) SelectBuilder {
-	return b.JoinClause("UNION "+join, rest...)
+	return builder.Append(b, "Compounds", newPart("UNION "+join, rest...)).(SelectBuilder)
 }
 
 // UnionAll adds UNION ALL to the query. (includes all matching rows)
 func (b SelectBuilder) UnionAll(join string, rest ...interface{}) SelectBuilder {
-	return b.JoinClause("UNION ALL "+join, rest...)
+	return builder.Append(b, "Compounds", newPart("UNION ALL "+join, rest...)).(SelectBuilder)
+}
+
+func (b SelectBuilder) unionSelectWithType(operator string, unions ...SelectBuilder) SelectBuilder {
+	if len(unions) == 0 {
+		return b
+	}
+	for _, union := range unions {
+		union = union.PlaceholderFormat(Question)
+		b = builder.Append(b, "Compounds", newCompoundSelectPart(operator, union)).(SelectBuilder)
+	}
+	return b
 }
 
 // Where adds an expression to the WHERE clause of the query.
