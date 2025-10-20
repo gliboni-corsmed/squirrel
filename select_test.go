@@ -188,6 +188,109 @@ func TestSelectBuilderNestedSelectJoin(t *testing.T) {
 	assert.Equal(t, args, expectedArgs)
 }
 
+func TestSelectBuilderJoinSelect(t *testing.T) {
+	sub := Select("id", "tenant_id").
+		From("users").
+		Where("status = ?", "active")
+
+	b := Select("orders.id").
+		From("orders").
+		JoinSelect(sub, "u", "u.id = orders.user_id AND u.tenant_id = orders.tenant_id AND u.active = ?", true)
+
+	sql, args, err := b.ToSql()
+	assert.NoError(t, err)
+
+	expectedSql := "SELECT orders.id FROM orders JOIN (SELECT id, tenant_id FROM users WHERE status = ?) AS u ON u.id = orders.user_id AND u.tenant_id = orders.tenant_id AND u.active = ?"
+	assert.Equal(t, expectedSql, sql)
+
+	expectedArgs := []interface{}{"active", true}
+	assert.Equal(t, expectedArgs, args)
+}
+
+func TestSelectBuilderLeftJoinSelectWithExprOn(t *testing.T) {
+	sub := Select("id").
+		From("users").
+		Where("region = ?", "emea")
+
+	onExpr := Expr("u.id = orders.user_id AND orders.active = ?", true)
+
+	b := Select("orders.id").
+		From("orders").
+		PlaceholderFormat(Dollar).
+		LeftJoinSelect(sub, "u", onExpr)
+
+	sql, args, err := b.ToSql()
+	assert.NoError(t, err)
+
+	expectedSql := "SELECT orders.id FROM orders LEFT JOIN (SELECT id FROM users WHERE region = $1) AS u ON u.id = orders.user_id AND orders.active = $2"
+	assert.Equal(t, expectedSql, sql)
+
+	expectedArgs := []interface{}{"emea", true}
+	assert.Equal(t, expectedArgs, args)
+}
+
+func TestSelectBuilderJoinSelectMissingAlias(t *testing.T) {
+	sub := Select("id").From("users")
+
+	_, _, err := Select("*").
+		From("orders").
+		JoinSelect(sub, "", "orders.user_id = users.id").
+		ToSql()
+
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "join alias must not be empty")
+}
+
+func TestSelectBuilderUnionSelect(t *testing.T) {
+	b := Select("id").
+		From("users").
+		Where("tenant_id = ?", 1).
+		UnionSelect(
+			Select("id").
+				From("archived_users").
+				Where("tenant_id = ?", 2),
+		).
+		OrderBy("id")
+
+	sql, args, err := b.ToSql()
+	assert.NoError(t, err)
+
+	expectedSql := "SELECT id FROM users WHERE tenant_id = ? UNION SELECT id FROM archived_users WHERE tenant_id = ? ORDER BY id"
+	assert.Equal(t, expectedSql, sql)
+	assert.Equal(t, []interface{}{1, 2}, args)
+}
+
+func TestSelectBuilderUnionAllSelectVarargs(t *testing.T) {
+	b := Select("id").
+		From("users").
+		UnionAllSelect(
+			Select("id").From("guests"),
+			Select("id").From("admins"),
+		)
+
+	sql, args, err := b.ToSql()
+	assert.NoError(t, err)
+
+	expectedSql := "SELECT id FROM users UNION ALL SELECT id FROM guests UNION ALL SELECT id FROM admins"
+	assert.Equal(t, expectedSql, sql)
+	assert.Empty(t, args)
+}
+
+func TestUnionFunctionPlaceholderFormatting(t *testing.T) {
+	union := Union(
+		Select("id").From("users").Where("tenant_id = ?", 1),
+		Select("id").From("guests").Where("tenant_id = ?", 2),
+		Select("id").From("admins").Where("tenant_id = ?", 3),
+	).PlaceholderFormat(Dollar)
+
+	sql, args, err := union.ToSql()
+	assert.NoError(t, err)
+
+	expectedSql := "SELECT id FROM users WHERE tenant_id = $1 UNION SELECT id FROM guests WHERE tenant_id = $2 UNION SELECT id FROM admins WHERE tenant_id = $3"
+	assert.Equal(t, expectedSql, sql)
+	assert.Equal(t, []interface{}{1, 2, 3}, args)
+}
+
 func TestSelectWithOptions(t *testing.T) {
 	sql, _, err := Select("*").From("foo").Distinct().Options("SQL_NO_CACHE").ToSql()
 

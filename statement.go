@@ -58,6 +58,30 @@ func Select(columns ...string) SelectBuilder {
 	return StatementBuilder.Select(columns...)
 }
 
+// Union combines multiple SelectBuilders with UNION clauses.
+func Union(selectStatements ...SelectBuilder) SelectBuilder {
+	return unionChain("UNION", selectStatements...)
+}
+
+// UnionAll combines multiple SelectBuilders with UNION ALL clauses.
+func UnionAll(selectStatements ...SelectBuilder) SelectBuilder {
+	return unionChain("UNION ALL", selectStatements...)
+}
+
+func unionChain(operator string, selectStatements ...SelectBuilder) SelectBuilder {
+	if len(selectStatements) == 0 {
+		return Select()
+	}
+
+	base := selectStatements[0]
+	if len(selectStatements) == 1 {
+		return base
+	}
+
+	base = base.unionSelectWithType(operator, selectStatements[1:]...)
+	return base
+}
+
 // Insert returns a new InsertBuilder with the given table name.
 //
 // See InsertBuilder.Into.
