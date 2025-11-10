@@ -176,3 +176,70 @@ func TestUpdateBuilderFromSelect(t *testing.T) {
 			"WHERE employees.account_id = subquery.id"
 	assert.Equal(t, expectedSql, sql)
 }
+
+func TestUpdateBuilderJoin(t *testing.T) {
+	sql, args, err := Update("employees").
+		Set("sales_count", 100).
+		Join("departments ON employees.department_id = departments.id").
+		Where("departments.name = ?", "Sales").
+		ToSql()
+
+	assert.NoError(t, err)
+	expectedSql := "UPDATE employees SET sales_count = ? JOIN departments ON employees.department_id = departments.id WHERE departments.name = ?"
+	assert.Equal(t, expectedSql, sql)
+	assert.Equal(t, []interface{}{100, "Sales"}, args)
+}
+
+func TestUpdateBuilderInnerJoin(t *testing.T) {
+	sql, args, err := Update("employees").
+		Set("bonus", 500).
+		InnerJoin("departments ON employees.department_id = departments.id").
+		Where("departments.budget > ?", 10000).
+		ToSql()
+
+	assert.NoError(t, err)
+	expectedSql := "UPDATE employees SET bonus = ? INNER JOIN departments ON employees.department_id = departments.id WHERE departments.budget > ?"
+	assert.Equal(t, expectedSql, sql)
+	assert.Equal(t, []interface{}{500, 10000}, args)
+}
+
+func TestUpdateBuilderLeftJoin(t *testing.T) {
+	sql, args, err := Update("employees").
+		Set("manager_name", Expr("managers.name")).
+		LeftJoin("employees AS managers ON employees.manager_id = managers.id").
+		Where("employees.active = ?", true).
+		ToSql()
+
+	assert.NoError(t, err)
+	expectedSql := "UPDATE employees SET manager_name = managers.name LEFT JOIN employees AS managers ON employees.manager_id = managers.id WHERE employees.active = ?"
+	assert.Equal(t, expectedSql, sql)
+	assert.Equal(t, []interface{}{true}, args)
+}
+
+func TestUpdateBuilderMultipleJoins(t *testing.T) {
+	sql, args, err := Update("orders").
+		Set("total_amount", Expr("order_items.price * order_items.quantity")).
+		Join("order_items ON orders.id = order_items.order_id").
+		Join("products ON order_items.product_id = products.id").
+		Where("products.category = ?", "Electronics").
+		Where("orders.status = ?", "pending").
+		ToSql()
+
+	assert.NoError(t, err)
+	expectedSql := "UPDATE orders SET total_amount = order_items.price * order_items.quantity JOIN order_items ON orders.id = order_items.order_id JOIN products ON order_items.product_id = products.id WHERE products.category = ? AND orders.status = ?"
+	assert.Equal(t, expectedSql, sql)
+	assert.Equal(t, []interface{}{"Electronics", "pending"}, args)
+}
+
+func TestUpdateBuilderJoinWithParams(t *testing.T) {
+	sql, args, err := Update("users").
+		Set("verified", true).
+		Join("user_verifications ON users.id = user_verifications.user_id AND user_verifications.status = ?", "approved").
+		Where("users.created_at > ?", "2024-01-01").
+		ToSql()
+
+	assert.NoError(t, err)
+	expectedSql := "UPDATE users SET verified = ? JOIN user_verifications ON users.id = user_verifications.user_id AND user_verifications.status = ? WHERE users.created_at > ?"
+	assert.Equal(t, expectedSql, sql)
+	assert.Equal(t, []interface{}{true, "approved", "2024-01-01"}, args)
+}

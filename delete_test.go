@@ -79,3 +79,65 @@ func TestDeleteWithQuery(t *testing.T) {
 
 	assert.Equal(t, expectedSql, db.LastQuerySql)
 }
+
+func TestDeleteBuilderJoin(t *testing.T) {
+	sql, args, err := Delete("orders").
+		Join("customers ON orders.customer_id = customers.id").
+		Where("customers.status = ?", "inactive").
+		ToSql()
+
+	assert.NoError(t, err)
+	expectedSql := "DELETE FROM orders JOIN customers ON orders.customer_id = customers.id WHERE customers.status = ?"
+	assert.Equal(t, expectedSql, sql)
+	assert.Equal(t, []interface{}{"inactive"}, args)
+}
+
+func TestDeleteBuilderInnerJoin(t *testing.T) {
+	sql, args, err := Delete("order_items").
+		InnerJoin("orders ON order_items.order_id = orders.id").
+		Where("orders.status = ?", "cancelled").
+		ToSql()
+
+	assert.NoError(t, err)
+	expectedSql := "DELETE FROM order_items INNER JOIN orders ON order_items.order_id = orders.id WHERE orders.status = ?"
+	assert.Equal(t, expectedSql, sql)
+	assert.Equal(t, []interface{}{"cancelled"}, args)
+}
+
+func TestDeleteBuilderLeftJoin(t *testing.T) {
+	sql, args, err := Delete("users").
+		LeftJoin("user_sessions ON users.id = user_sessions.user_id").
+		Where("user_sessions.last_activity < ?", "2023-01-01").
+		ToSql()
+
+	assert.NoError(t, err)
+	expectedSql := "DELETE FROM users LEFT JOIN user_sessions ON users.id = user_sessions.user_id WHERE user_sessions.last_activity < ?"
+	assert.Equal(t, expectedSql, sql)
+	assert.Equal(t, []interface{}{"2023-01-01"}, args)
+}
+
+func TestDeleteBuilderMultipleJoins(t *testing.T) {
+	sql, args, err := Delete("products").
+		Join("categories ON products.category_id = categories.id").
+		Join("suppliers ON products.supplier_id = suppliers.id").
+		Where("categories.deprecated = ?", true).
+		Where("suppliers.active = ?", false).
+		ToSql()
+
+	assert.NoError(t, err)
+	expectedSql := "DELETE FROM products JOIN categories ON products.category_id = categories.id JOIN suppliers ON products.supplier_id = suppliers.id WHERE categories.deprecated = ? AND suppliers.active = ?"
+	assert.Equal(t, expectedSql, sql)
+	assert.Equal(t, []interface{}{true, false}, args)
+}
+
+func TestDeleteBuilderJoinWithParams(t *testing.T) {
+	sql, args, err := Delete("logs").
+		Join("log_levels ON logs.level_id = log_levels.id AND log_levels.name = ?", "DEBUG").
+		Where("logs.created_at < ?", "2024-01-01").
+		ToSql()
+
+	assert.NoError(t, err)
+	expectedSql := "DELETE FROM logs JOIN log_levels ON logs.level_id = log_levels.id AND log_levels.name = ? WHERE logs.created_at < ?"
+	assert.Equal(t, expectedSql, sql)
+	assert.Equal(t, []interface{}{"DEBUG", "2024-01-01"}, args)
+}

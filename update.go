@@ -17,6 +17,7 @@ type updateData struct {
 	CTEs              []Sqlizer
 	Table             string
 	SetClauses        []setClause
+	Joins             []Sqlizer
 	From              Sqlizer
 	WhereParts        []Sqlizer
 	OrderBys          []string
@@ -110,6 +111,14 @@ func (d *updateData) ToSql() (sqlStr string, args []interface{}, err error) {
 		setSqls[i] = fmt.Sprintf("%s = %s", setClause.column, valSql)
 	}
 	sql.WriteString(strings.Join(setSqls, ", "))
+
+	if len(d.Joins) > 0 {
+		sql.WriteString(" ")
+		args, err = appendToSql(d.Joins, sql, " ", args)
+		if err != nil {
+			return
+		}
+	}
 
 	if d.From != nil {
 		sql.WriteString(" FROM ")
@@ -311,4 +320,34 @@ func (b UpdateBuilder) WithRecursive(alias string, expr Sqlizer) UpdateBuilder {
 // The sqlizer will be sandwiched between the keyword WITH and, if there's more than one CTE, a comma.
 func (b UpdateBuilder) WithCTE(cte Sqlizer) UpdateBuilder {
 	return builder.Append(b, "CTEs", cte).(UpdateBuilder)
+}
+
+// JoinClause adds a join clause to the query.
+func (b UpdateBuilder) JoinClause(pred interface{}, args ...interface{}) UpdateBuilder {
+	return builder.Append(b, "Joins", newPart(pred, args...)).(UpdateBuilder)
+}
+
+// Join adds a JOIN clause to the query.
+func (b UpdateBuilder) Join(join string, rest ...interface{}) UpdateBuilder {
+	return b.JoinClause("JOIN "+join, rest...)
+}
+
+// LeftJoin adds a LEFT JOIN clause to the query.
+func (b UpdateBuilder) LeftJoin(join string, rest ...interface{}) UpdateBuilder {
+	return b.JoinClause("LEFT JOIN "+join, rest...)
+}
+
+// RightJoin adds a RIGHT JOIN clause to the query.
+func (b UpdateBuilder) RightJoin(join string, rest ...interface{}) UpdateBuilder {
+	return b.JoinClause("RIGHT JOIN "+join, rest...)
+}
+
+// InnerJoin adds an INNER JOIN clause to the query.
+func (b UpdateBuilder) InnerJoin(join string, rest ...interface{}) UpdateBuilder {
+	return b.JoinClause("INNER JOIN "+join, rest...)
+}
+
+// CrossJoin adds a CROSS JOIN clause to the query.
+func (b UpdateBuilder) CrossJoin(join string, rest ...interface{}) UpdateBuilder {
+	return b.JoinClause("CROSS JOIN "+join, rest...)
 }
