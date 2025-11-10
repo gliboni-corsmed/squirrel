@@ -89,6 +89,14 @@ func (d *updateData) ToSql() (sqlStr string, args []interface{}, err error) {
 	sql.WriteString("UPDATE ")
 	sql.WriteString(d.Table)
 
+	if len(d.Joins) > 0 {
+		sql.WriteString(" ")
+		args, err = appendToSql(d.Joins, sql, " ", args)
+		if err != nil {
+			return
+		}
+	}
+
 	sql.WriteString(" SET ")
 	setSqls := make([]string, len(d.SetClauses))
 	for i, setClause := range d.SetClauses {
@@ -111,14 +119,6 @@ func (d *updateData) ToSql() (sqlStr string, args []interface{}, err error) {
 		setSqls[i] = fmt.Sprintf("%s = %s", setClause.column, valSql)
 	}
 	sql.WriteString(strings.Join(setSqls, ", "))
-
-	if len(d.Joins) > 0 {
-		sql.WriteString(" ")
-		args, err = appendToSql(d.Joins, sql, " ", args)
-		if err != nil {
-			return
-		}
-	}
 
 	if d.From != nil {
 		sql.WriteString(" FROM ")
