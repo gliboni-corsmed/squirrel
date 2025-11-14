@@ -21,6 +21,10 @@ func (p wherePart) ToSql() (sql string, args []interface{}, err error) {
 	case map[string]interface{}:
 		return Eq(pred).ToSql()
 	case string:
+		// For string predicates with arguments, use Expr to handle slice expansion
+		if len(p.args) > 0 {
+			return Expr(pred, p.args...).ToSql()
+		}
 		sql = pred
 		args = p.args
 	default:

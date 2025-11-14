@@ -33,6 +33,12 @@ func (e expr) ToSql() (sql string, args []interface{}, err error) {
 	for _, arg := range e.args {
 		if _, ok := arg.(Sqlizer); ok {
 			simple = false
+			break
+		}
+		// Check if arg is a slice/array (but not []byte which should be treated as a single value)
+		if isListType(arg) {
+			simple = false
+			break
 		}
 	}
 	if simple {
@@ -65,6 +71,22 @@ func (e expr) ToSql() (sql string, args []interface{}, err error) {
 			buf.WriteString(sp[:i])
 			buf.WriteString(isql)
 			args = append(args, iargs...)
+		} else if isListType(ap[0]) {
+			// Fix for issue #383: Handle slice arguments
+			// Expand slice into (?, ?, ...) and add individual elements to args
+			valVal := reflect.ValueOf(ap[0])
+			buf.WriteString(sp[:i])
+			if valVal.Len() == 0 {
+				// Empty slice - use (NULL) or similar
+				buf.WriteString("(NULL)")
+			} else {
+				buf.WriteString("(")
+				buf.WriteString(Placeholders(valVal.Len()))
+				buf.WriteString(")")
+				for j := 0; j < valVal.Len(); j++ {
+					args = append(args, valVal.Index(j).Interface())
+				}
+			}
 		} else {
 			// normal argument; append it and the placeholder
 			buf.WriteString(sp[:i+1])
@@ -367,8 +389,10 @@ func (gtOrEq GtOrEq) ToSql() (sql string, args []interface{}, err error) {
 type conj []Sqlizer
 
 func (c conj) join(sep, defaultExpr string) (sql string, args []interface{}, err error) {
+	// Fix for issue #382: Empty/nil conjunctions should not produce SQL
+	// This prevents WHERE clauses from being added when filters are nil
 	if len(c) == 0 {
-		return defaultExpr, []interface{}{}, nil
+		return "", []interface{}{}, nil
 	}
 	var sqlParts []string
 	for _, sqlizer := range c {
@@ -399,6 +423,26 @@ type Or conj
 
 func (o Or) ToSql() (string, []interface{}, error) {
 	return conj(o).join(" OR ", sqlFalse)
+}
+
+// Not negates a Sqlizer, wrapping it in "NOT (...)"
+// Useful for creating NOR expressions and negating complex conditions.
+// Ex:
+//     .Where(Not(Or{Eq{"age": 20}, Eq{"owner": "a"}}))
+//     // produces: WHERE NOT ((age = ? OR owner = ?))
+type Not struct {
+	Sqlizer Sqlizer
+}
+
+func (n Not) ToSql() (string, []interface{}, error) {
+	sql, args, err := nestedToSql(n.Sqlizer)
+	if err != nil {
+		return "", nil, err
+	}
+	if sql == "" {
+		return "", args, nil
+	}
+	return fmt.Sprintf("NOT %s", sql), args, nil
 }
 
 func getSortedKeys(exp map[string]interface{}) []string {

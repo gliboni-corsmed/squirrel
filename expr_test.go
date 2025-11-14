@@ -316,10 +316,11 @@ func TestNotNilPointer(t *testing.T) {
 }
 
 func TestEmptyAndToSql(t *testing.T) {
+	// Fix for issue #382: Empty And should return empty string, not (1=1)
 	sql, args, err := And{}.ToSql()
 	assert.NoError(t, err)
 
-	expectedSql := "(1=1)"
+	expectedSql := ""
 	assert.Equal(t, expectedSql, sql)
 
 	expectedArgs := []interface{}{}
@@ -327,14 +328,26 @@ func TestEmptyAndToSql(t *testing.T) {
 }
 
 func TestEmptyOrToSql(t *testing.T) {
+	// Fix for issue #382: Empty Or should return empty string, not (1=0)
 	sql, args, err := Or{}.ToSql()
 	assert.NoError(t, err)
 
-	expectedSql := "(1=0)"
+	expectedSql := ""
 	assert.Equal(t, expectedSql, sql)
 
 	expectedArgs := []interface{}{}
 	assert.Equal(t, expectedArgs, args)
+}
+
+func TestNilOrInWhereClause(t *testing.T) {
+	// Test for issue #382 - nil Or should not add WHERE clause
+	var filter Or
+	sql, args, err := Select("*").From("users").Where(filter).ToSql()
+	assert.NoError(t, err)
+
+	expectedSql := "SELECT * FROM users"
+	assert.Equal(t, expectedSql, sql)
+	assert.Empty(t, args)
 }
 
 func TestLikeToSql(t *testing.T) {
@@ -461,4 +474,106 @@ func ExampleEq() {
 	Select("id", "created", "first_name").From("users").Where(Eq{
 		"company": 20,
 	})
+}
+
+func TestNotToSql(t *testing.T) {
+	// Test for issue #386 - NOT operator for negating conditions
+	b := Not{Eq{"id": 1}}
+	sql, args, err := b.ToSql()
+	assert.NoError(t, err)
+
+	expectedSql := "NOT id = ?"
+	assert.Equal(t, expectedSql, sql)
+
+	expectedArgs := []interface{}{1}
+	assert.Equal(t, expectedArgs, args)
+}
+
+func TestNotWithOrToSql(t *testing.T) {
+	// Test NOR operation using Not with Or
+	// Equivalent to MongoDB's $nor operator
+	b := Not{Or{Eq{"age": 20}, Eq{"owner": "a"}}}
+	sql, args, err := b.ToSql()
+	assert.NoError(t, err)
+
+	expectedSql := "NOT (age = ? OR owner = ?)"
+	assert.Equal(t, expectedSql, sql)
+
+	expectedArgs := []interface{}{20, "a"}
+	assert.Equal(t, expectedArgs, args)
+}
+
+func TestNotWithAndToSql(t *testing.T) {
+	b := Not{And{Eq{"active": true}, Gt{"score": 100}}}
+	sql, args, err := b.ToSql()
+	assert.NoError(t, err)
+
+	expectedSql := "NOT (active = ? AND score > ?)"
+	assert.Equal(t, expectedSql, sql)
+
+	expectedArgs := []interface{}{true, 100}
+	assert.Equal(t, expectedArgs, args)
+}
+
+func TestNotInSelectQuery(t *testing.T) {
+	// Test using Not in a SELECT query
+	query := Select("*").From("users").Where(Not{Or{Eq{"age": 20}, Eq{"owner": "a"}}})
+	sql, args, err := query.ToSql()
+	assert.NoError(t, err)
+
+	expectedSql := "SELECT * FROM users WHERE NOT (age = ? OR owner = ?)"
+	assert.Equal(t, expectedSql, sql)
+
+	expectedArgs := []interface{}{20, "a"}
+	assert.Equal(t, expectedArgs, args)
+}
+
+func TestExprWithSliceArgument(t *testing.T) {
+	// Test for issue #383 - Expr should handle slice arguments
+	query := Select("*").From("table").Where("id NOT IN ?", []int{1, 2, 3})
+	sql, args, err := query.ToSql()
+	assert.NoError(t, err)
+
+	expectedSql := "SELECT * FROM table WHERE id NOT IN (?,?,?)"
+	assert.Equal(t, expectedSql, sql)
+
+	expectedArgs := []interface{}{1, 2, 3}
+	assert.Equal(t, expectedArgs, args)
+}
+
+func TestExprWithEmptySlice(t *testing.T) {
+	// Test Expr with empty slice
+	query := Select("*").From("table").Where("id IN ?", []int{})
+	sql, args, err := query.ToSql()
+	assert.NoError(t, err)
+
+	expectedSql := "SELECT * FROM table WHERE id IN (NULL)"
+	assert.Equal(t, expectedSql, sql)
+	assert.Empty(t, args)
+}
+
+func TestExprWithMultipleSlices(t *testing.T) {
+	// Test Expr with multiple slice arguments
+	query := Select("*").From("table").Where("id IN ? AND status IN ?", []int{1, 2}, []string{"active", "pending"})
+	sql, args, err := query.ToSql()
+	assert.NoError(t, err)
+
+	expectedSql := "SELECT * FROM table WHERE id IN (?,?) AND status IN (?,?)"
+	assert.Equal(t, expectedSql, sql)
+
+	expectedArgs := []interface{}{1, 2, "active", "pending"}
+	assert.Equal(t, expectedArgs, args)
+}
+
+func TestExprWithMixedArguments(t *testing.T) {
+	// Test Expr with mixed regular and slice arguments
+	query := Select("*").From("table").Where("name = ? AND id IN ?", "test", []int{1, 2, 3})
+	sql, args, err := query.ToSql()
+	assert.NoError(t, err)
+
+	expectedSql := "SELECT * FROM table WHERE name = ? AND id IN (?,?,?)"
+	assert.Equal(t, expectedSql, sql)
+
+	expectedArgs := []interface{}{"test", 1, 2, 3}
+	assert.Equal(t, expectedArgs, args)
 }

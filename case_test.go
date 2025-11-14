@@ -148,3 +148,55 @@ func TestCaseBuilderMustSql(t *testing.T) {
 	}()
 	Case("").MustSql()
 }
+
+func TestCaseWithIntegerValues(t *testing.T) {
+	// Test for issue #388 - CASE WHEN should accept integer values
+	caseStmt := Case("order_no").
+		When("'ORD001'", 500).
+		When("'ORD002'", 600).
+		Else(0)
+
+	sql, args, err := Update("orders").
+		Set("amount", caseStmt).
+		Where(Eq{"status": "pending"}).
+		ToSql()
+
+	assert.NoError(t, err)
+
+	expectedSql := "UPDATE orders SET amount = CASE order_no " +
+		"WHEN 'ORD001' THEN ? " +
+		"WHEN 'ORD002' THEN ? " +
+		"ELSE ? " +
+		"END " +
+		"WHERE status = ?"
+	assert.Equal(t, expectedSql, sql)
+
+	expectedArgs := []interface{}{500, 600, 0, "pending"}
+	assert.Equal(t, expectedArgs, args)
+}
+
+func TestCaseWithMixedTypes(t *testing.T) {
+	// Test CASE with mixed types (strings, integers, floats, booleans)
+	caseStmt := Case().
+		When(Eq{"type": "A"}, 100).
+		When(Eq{"type": "B"}, 200.5).
+		When(Eq{"type": "C"}, true).
+		Else("default")
+
+	qb := Select().Column(Alias(caseStmt, "value")).From("table")
+	sql, args, err := qb.ToSql()
+
+	assert.NoError(t, err)
+
+	expectedSql := "SELECT (CASE " +
+		"WHEN type = ? THEN ? " +
+		"WHEN type = ? THEN ? " +
+		"WHEN type = ? THEN ? " +
+		"ELSE default " +
+		"END) AS value " +
+		"FROM table"
+	assert.Equal(t, expectedSql, sql)
+
+	expectedArgs := []interface{}{"A", 100, "B", 200.5, "C", true}
+	assert.Equal(t, expectedArgs, args)
+}
