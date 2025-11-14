@@ -243,3 +243,30 @@ func TestUpdateBuilderJoinWithParams(t *testing.T) {
 	assert.Equal(t, expectedSql, sql)
 	assert.Equal(t, []interface{}{"approved", true, "2024-01-01"}, args)
 }
+
+func TestUpdateBuilderNilOrClause(t *testing.T) {
+	// Test for issue #382 - nil Or should not add WHERE clause in UPDATE
+	var filter Or
+	sql, args, err := Update("users").
+		Set("status", "active").
+		Where(filter).
+		ToSql()
+
+	assert.NoError(t, err)
+	expectedSql := "UPDATE users SET status = ?"
+	assert.Equal(t, expectedSql, sql)
+	assert.Equal(t, []interface{}{"active"}, args)
+}
+
+func TestUpdateBuilderEmptyAndClause(t *testing.T) {
+	// Test for issue #382 - empty And should not add WHERE clause in UPDATE
+	sql, args, err := Update("users").
+		Set("status", "inactive").
+		Where(And{}).
+		ToSql()
+
+	assert.NoError(t, err)
+	expectedSql := "UPDATE users SET status = ?"
+	assert.Equal(t, expectedSql, sql)
+	assert.Equal(t, []interface{}{"inactive"}, args)
+}

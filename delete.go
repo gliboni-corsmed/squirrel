@@ -58,10 +58,17 @@ func (d *deleteData) ToSql() (sqlStr string, args []interface{}, err error) {
 	}
 
 	if len(d.WhereParts) > 0 {
-		sql.WriteString(" WHERE ")
-		args, err = appendToSql(d.WhereParts, sql, " AND ", args)
-		if err != nil {
+		// Fix for issue #382: Only add WHERE if there's actual content
+		whereBuf := &bytes.Buffer{}
+		whereArgs, whereErr := appendToSql(d.WhereParts, whereBuf, " AND ", nil)
+		if whereErr != nil {
+			err = whereErr
 			return
+		}
+		if whereBuf.Len() > 0 {
+			sql.WriteString(" WHERE ")
+			sql.WriteString(whereBuf.String())
+			args = append(args, whereArgs...)
 		}
 	}
 

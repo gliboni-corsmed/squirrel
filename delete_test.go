@@ -141,3 +141,28 @@ func TestDeleteBuilderJoinWithParams(t *testing.T) {
 	assert.Equal(t, expectedSql, sql)
 	assert.Equal(t, []interface{}{"DEBUG", "2024-01-01"}, args)
 }
+
+func TestDeleteBuilderNilOrClause(t *testing.T) {
+	// Test for issue #382 - nil Or should not add WHERE clause in DELETE
+	var filter Or
+	sql, args, err := Delete("users").
+		Where(filter).
+		ToSql()
+
+	assert.NoError(t, err)
+	expectedSql := "DELETE FROM users"
+	assert.Equal(t, expectedSql, sql)
+	assert.Empty(t, args)
+}
+
+func TestDeleteBuilderEmptyAndClause(t *testing.T) {
+	// Test for issue #382 - empty And should not add WHERE clause in DELETE
+	sql, args, err := Delete("users").
+		Where(And{}).
+		ToSql()
+
+	assert.NoError(t, err)
+	expectedSql := "DELETE FROM users"
+	assert.Equal(t, expectedSql, sql)
+	assert.Empty(t, args)
+}
