@@ -542,14 +542,13 @@ func TestExprWithSliceArgument(t *testing.T) {
 }
 
 func TestExprWithEmptySlice(t *testing.T) {
-	// Test Expr with empty slice
+	// Test Expr with empty slice - should return an error
+	// Users should check for empty slices before building queries or use Eq{}
 	query := Select("*").From("table").Where("id IN ?", []int{})
-	sql, args, err := query.ToSql()
-	assert.NoError(t, err)
+	_, _, err := query.ToSql()
 
-	expectedSql := "SELECT * FROM table WHERE id IN (NULL)"
-	assert.Equal(t, expectedSql, sql)
-	assert.Empty(t, args)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "empty slice")
 }
 
 func TestExprWithMultipleSlices(t *testing.T) {

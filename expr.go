@@ -73,19 +73,21 @@ func (e expr) ToSql() (sql string, args []interface{}, err error) {
 			args = append(args, iargs...)
 		} else if isListType(ap[0]) {
 			// Fix for issue #383: Handle slice arguments
-			// Expand slice into (?, ?, ...) and add individual elements to args
+			// Expand non-empty slices into (?, ?, ...)
 			valVal := reflect.ValueOf(ap[0])
-			buf.WriteString(sp[:i])
 			if valVal.Len() == 0 {
-				// Empty slice - use (NULL) or similar
-				buf.WriteString("(NULL)")
-			} else {
-				buf.WriteString("(")
-				buf.WriteString(Placeholders(valVal.Len()))
-				buf.WriteString(")")
-				for j := 0; j < valVal.Len(); j++ {
-					args = append(args, valVal.Index(j).Interface())
-				}
+				// Empty slice - return error since "WHERE id IN ()" is invalid SQL
+				// Users should check for empty slices before building queries
+				err = fmt.Errorf("empty slice passed to Expr placeholder at position %d; use Eq{} for proper empty slice handling or check slice length before building query", len(args)+1)
+				return
+			}
+			buf.WriteString(sp[:i])
+			// Expand slice into (?, ?, ...)
+			buf.WriteString("(")
+			buf.WriteString(Placeholders(valVal.Len()))
+			buf.WriteString(")")
+			for j := 0; j < valVal.Len(); j++ {
+				args = append(args, valVal.Index(j).Interface())
 			}
 		} else {
 			// normal argument; append it and the placeholder
