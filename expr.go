@@ -391,10 +391,11 @@ func (gtOrEq GtOrEq) ToSql() (sql string, args []interface{}, err error) {
 type conj []Sqlizer
 
 func (c conj) join(sep, defaultExpr string) (sql string, args []interface{}, err error) {
-	// Fix for issue #382: Empty/nil conjunctions should not produce SQL
-	// This prevents WHERE clauses from being added when filters are nil
+	// Fix for issue #382:
+	// - Empty/nil conjunctions return default expr (1=1 or 1=0) for safety
+	// - WHERE clause generation will skip if result is default expr
 	if len(c) == 0 {
-		return "", []interface{}{}, nil
+		return defaultExpr, []interface{}{}, nil
 	}
 	var sqlParts []string
 	for _, sqlizer := range c {
@@ -409,6 +410,10 @@ func (c conj) join(sep, defaultExpr string) (sql string, args []interface{}, err
 	}
 	if len(sqlParts) > 0 {
 		sql = fmt.Sprintf("(%s)", strings.Join(sqlParts, sep))
+	} else {
+		// All sqlizers returned empty - use default expression for safety
+		sql = defaultExpr
+		args = []interface{}{}
 	}
 	return
 }

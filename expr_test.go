@@ -316,11 +316,12 @@ func TestNotNilPointer(t *testing.T) {
 }
 
 func TestEmptyAndToSql(t *testing.T) {
-	// Fix for issue #382: Empty And should return empty string, not (1=1)
+	// Fix for issue #382: Empty And returns (1=1) for safety
+	// WHERE clause generation will skip it to avoid misleading SQL
 	sql, args, err := And{}.ToSql()
 	assert.NoError(t, err)
 
-	expectedSql := ""
+	expectedSql := "(1=1)"
 	assert.Equal(t, expectedSql, sql)
 
 	expectedArgs := []interface{}{}
@@ -328,11 +329,12 @@ func TestEmptyAndToSql(t *testing.T) {
 }
 
 func TestEmptyOrToSql(t *testing.T) {
-	// Fix for issue #382: Empty Or should return empty string, not (1=0)
+	// Fix for issue #382: Empty Or returns (1=0) for safety
+	// WHERE clause generation will skip it to prevent mass updates
 	sql, args, err := Or{}.ToSql()
 	assert.NoError(t, err)
 
-	expectedSql := ""
+	expectedSql := "(1=0)"
 	assert.Equal(t, expectedSql, sql)
 
 	expectedArgs := []interface{}{}
