@@ -86,7 +86,7 @@ func TestWithToSqlErr(t *testing.T) {
 	assert.Error(t, err)
 }
 
-var testDebugUpdateSQL = Update("table").SetMap(Eq{"x": 1, "y": "val"})
+var testDebugUpdateSQL = Update("table").SetMap(Eq{"x": 1, "y": "val"}).AllowNoWhere()
 var expectedDebugUpateSQL = "UPDATE table SET x = '1', y = 'val'"
 
 func TestDebugSqlizerUpdateColon(t *testing.T) {

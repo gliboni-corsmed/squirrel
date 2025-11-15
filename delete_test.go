@@ -147,6 +147,7 @@ func TestDeleteBuilderNilOrClause(t *testing.T) {
 	var filter Or
 	sql, args, err := Delete("users").
 		Where(filter).
+		AllowNoWhere().
 		ToSql()
 
 	assert.NoError(t, err)
@@ -159,10 +160,26 @@ func TestDeleteBuilderEmptyAndClause(t *testing.T) {
 	// Test for issue #382 - empty And should not add WHERE clause in DELETE
 	sql, args, err := Delete("users").
 		Where(And{}).
+		AllowNoWhere().
 		ToSql()
 
 	assert.NoError(t, err)
 	expectedSql := "DELETE FROM users"
 	assert.Equal(t, expectedSql, sql)
+	assert.Empty(t, args)
+}
+
+func TestDeleteBuilderRequiresAllowNoWhere(t *testing.T) {
+	// DELETE without WHERE should require AllowNoWhere()
+	_, _, err := Delete("users").ToSql()
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "AllowNoWhere")
+}
+
+func TestDeleteBuilderAllowNoWhere(t *testing.T) {
+	// DELETE with AllowNoWhere() should succeed
+	sql, args, err := Delete("users").AllowNoWhere().ToSql()
+	assert.NoError(t, err)
+	assert.Equal(t, "DELETE FROM users", sql)
 	assert.Empty(t, args)
 }

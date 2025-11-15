@@ -324,7 +324,8 @@ func Example_emptyOrBehavior() {
 // Example_emptyAndBehavior demonstrates empty And{} behavior (issue #382)
 func Example_emptyAndBehavior() {
 	// Empty And{} produces (1=1) but WHERE clause is skipped
-	sql, args, _ := Update("users").Set("status", "active").Where(And{}).ToSql()
+	// UPDATE/DELETE without WHERE requires AllowNoWhere() for safety
+	sql, args, _ := Update("users").Set("status", "active").Where(And{}).AllowNoWhere().ToSql()
 
 	fmt.Println(sql)
 	fmt.Println(args)
@@ -336,8 +337,9 @@ func Example_emptyAndBehavior() {
 // Example_nilFilterBehavior demonstrates nil filter behavior (issue #382 fix)
 func Example_nilFilterBehavior() {
 	// Nil Or/And filters don't add WHERE clause
+	// DELETE without WHERE requires AllowNoWhere() for safety
 	var filter Or
-	sql, args, _ := Delete("logs").Where(filter).ToSql()
+	sql, args, _ := Delete("logs").Where(filter).AllowNoWhere().ToSql()
 
 	fmt.Println(sql)
 	fmt.Println(len(args))
@@ -386,9 +388,9 @@ func Example_emptySliceWithEq() {
 
 // Example_intentionalMassOperation demonstrates explicit mass operation
 func Example_intentionalMassOperation() {
-	// For intentional mass operations, don't use Where() at all
-	// This makes the intent clear
-	sql, args, _ := Update("cache").Set("valid", false).ToSql()
+	// For intentional mass operations, use AllowNoWhere() to make intent explicit
+	// This prevents accidental mass updates/deletes
+	sql, args, _ := Update("cache").Set("valid", false).AllowNoWhere().ToSql()
 
 	fmt.Println(sql)
 	fmt.Println(args)

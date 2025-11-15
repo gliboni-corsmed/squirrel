@@ -128,7 +128,7 @@ func TestUpdateBuilderMustSql(t *testing.T) {
 }
 
 func TestUpdateBuilderPlaceholders(t *testing.T) {
-	b := Update("test").SetMap(Eq{"x": 1, "y": 2})
+	b := Update("test").SetMap(Eq{"x": 1, "y": 2}).AllowNoWhere()
 
 	sql, _, _ := b.PlaceholderFormat(Question).ToSql()
 	assert.Equal(t, "UPDATE test SET x = ?, y = ?", sql)
@@ -139,7 +139,7 @@ func TestUpdateBuilderPlaceholders(t *testing.T) {
 
 func TestUpdateBuilderRunners(t *testing.T) {
 	db := &DBStub{}
-	b := Update("test").Set("x", 1).RunWith(db)
+	b := Update("test").Set("x", 1).AllowNoWhere().RunWith(db)
 
 	expectedSql := "UPDATE test SET x = ?"
 
@@ -250,6 +250,7 @@ func TestUpdateBuilderNilOrClause(t *testing.T) {
 	sql, args, err := Update("users").
 		Set("status", "active").
 		Where(filter).
+		AllowNoWhere().
 		ToSql()
 
 	assert.NoError(t, err)
@@ -263,10 +264,26 @@ func TestUpdateBuilderEmptyAndClause(t *testing.T) {
 	sql, args, err := Update("users").
 		Set("status", "inactive").
 		Where(And{}).
+		AllowNoWhere().
 		ToSql()
 
 	assert.NoError(t, err)
 	expectedSql := "UPDATE users SET status = ?"
 	assert.Equal(t, expectedSql, sql)
 	assert.Equal(t, []interface{}{"inactive"}, args)
+}
+
+func TestUpdateBuilderRequiresAllowNoWhere(t *testing.T) {
+	// UPDATE without WHERE should require AllowNoWhere()
+	_, _, err := Update("users").Set("status", "active").ToSql()
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "AllowNoWhere")
+}
+
+func TestUpdateBuilderAllowNoWhere(t *testing.T) {
+	// UPDATE with AllowNoWhere() should succeed
+	sql, args, err := Update("users").Set("status", "active").AllowNoWhere().ToSql()
+	assert.NoError(t, err)
+	assert.Equal(t, "UPDATE users SET status = ?", sql)
+	assert.Equal(t, []interface{}{"active"}, args)
 }

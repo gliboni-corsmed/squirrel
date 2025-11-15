@@ -24,6 +24,7 @@ type updateData struct {
 	Limit             string
 	Offset            string
 	Suffixes          []Sqlizer
+	AllowNoWhere      bool
 }
 
 type setClause struct {
@@ -128,6 +129,7 @@ func (d *updateData) ToSql() (sqlStr string, args []interface{}, err error) {
 		}
 	}
 
+	hasWhere := false
 	if len(d.WhereParts) > 0 {
 		// Fix for issue #382: Only add WHERE if there's actual content
 		// Skip WHERE if result is (1=1) or (1=0) from empty And{}/Or{}
@@ -143,7 +145,14 @@ func (d *updateData) ToSql() (sqlStr string, args []interface{}, err error) {
 			sql.WriteString(" WHERE ")
 			sql.WriteString(whereSQL)
 			args = append(args, whereArgs...)
+			hasWhere = true
 		}
+	}
+
+	// Require explicit opt-in for UPDATE without WHERE to prevent accidental mass updates
+	if !hasWhere && !d.AllowNoWhere {
+		err = fmt.Errorf("UPDATE statement without WHERE clause requires explicit AllowNoWhere() call")
+		return
 	}
 
 	if len(d.OrderBys) > 0 {
@@ -289,6 +298,18 @@ func (b UpdateBuilder) FromSelect(from SelectBuilder, alias string) UpdateBuilde
 // See SelectBuilder.Where for more information.
 func (b UpdateBuilder) Where(pred interface{}, args ...interface{}) UpdateBuilder {
 	return builder.Append(b, "WhereParts", newWherePart(pred, args...)).(UpdateBuilder)
+}
+
+// AllowNoWhere explicitly allows UPDATE statements without a WHERE clause.
+// By default, UPDATE statements without a WHERE clause will return an error
+// to prevent accidental mass updates. Call this method to indicate that
+// updating all rows is intentional.
+//
+// Example:
+//
+//	Update("cache").Set("valid", false).AllowNoWhere().ToSql()
+func (b UpdateBuilder) AllowNoWhere() UpdateBuilder {
+	return builder.Set(b, "AllowNoWhere", true).(UpdateBuilder)
 }
 
 // OrderBy adds ORDER BY expressions to the query.
