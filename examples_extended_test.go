@@ -308,3 +308,91 @@ func Example_combinedFeatures() {
 	// SELECT id, name, (CASE status WHEN 'active' THEN ? WHEN 'pending' THEN ? ELSE ? END) AS status_code FROM users WHERE id NOT IN (?,?,?) AND NOT (deleted = ? OR banned = ?) ORDER BY status_code DESC, name ASC
 	// [1 0 -1 5 10 15 true true]
 }
+
+// Example_emptyOrBehavior demonstrates empty Or{} behavior (issue #382)
+func Example_emptyOrBehavior() {
+	// Empty Or{} produces (1=0) but WHERE clause is skipped
+	sql, args, _ := Select("*").From("users").Where(Or{}).ToSql()
+
+	fmt.Println(sql)
+	fmt.Println(args)
+	// Output:
+	// SELECT * FROM users
+	// []
+}
+
+// Example_emptyAndBehavior demonstrates empty And{} behavior (issue #382)
+func Example_emptyAndBehavior() {
+	// Empty And{} produces (1=1) but WHERE clause is skipped
+	sql, args, _ := Update("users").Set("status", "active").Where(And{}).ToSql()
+
+	fmt.Println(sql)
+	fmt.Println(args)
+	// Output:
+	// UPDATE users SET status = ?
+	// [active]
+}
+
+// Example_nilFilterBehavior demonstrates nil filter behavior (issue #382 fix)
+func Example_nilFilterBehavior() {
+	// Nil Or/And filters don't add WHERE clause
+	var filter Or
+	sql, args, _ := Delete("logs").Where(filter).ToSql()
+
+	fmt.Println(sql)
+	fmt.Println(len(args))
+	// Output:
+	// DELETE FROM logs
+	// 0
+}
+
+// Example_safeConditionalFilter demonstrates safe pattern for conditional filters
+func Example_safeConditionalFilter() {
+	// Safe: Only add WHERE if conditions exist
+	userID := 123
+	var conditions []Sqlizer
+
+	if userID > 0 {
+		conditions = append(conditions, Eq{"user_id": userID})
+	}
+
+	query := Select("*").From("orders")
+	if len(conditions) > 0 {
+		query = query.Where(And(conditions))
+	}
+
+	sql, args, _ := query.ToSql()
+	fmt.Println(sql)
+	fmt.Println(args)
+	// Output:
+	// SELECT * FROM orders WHERE (user_id = ?)
+	// [123]
+}
+
+// Example_emptySliceWithEq demonstrates safe empty slice handling
+func Example_emptySliceWithEq() {
+	// Eq{} handles empty slices safely - generates (1=0) internally but WHERE is omitted
+	// This results in a query that matches nothing without requiring manual checks
+	ids := []int{} // Empty slice
+
+	sql, args, _ := Select("*").From("users").Where(Eq{"id": ids}).ToSql()
+
+	fmt.Println(sql)
+	fmt.Println(len(args))
+	// Output:
+	// SELECT * FROM users
+	// 0
+}
+
+// Example_intentionalMassOperation demonstrates explicit mass operation
+func Example_intentionalMassOperation() {
+	// For intentional mass operations, don't use Where() at all
+	// This makes the intent clear
+	sql, args, _ := Update("cache").Set("valid", false).ToSql()
+
+	fmt.Println(sql)
+	fmt.Println(args)
+	// Output:
+	// UPDATE cache SET valid = ?
+	// [false]
+}
