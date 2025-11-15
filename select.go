@@ -120,10 +120,20 @@ func (d *selectData) toSqlRaw() (sqlStr string, args []interface{}, err error) {
 	}
 
 	if len(d.WhereParts) > 0 {
-		sql.WriteString(" WHERE ")
-		args, err = appendToSql(d.WhereParts, sql, " AND ", args)
-		if err != nil {
+		// Fix for issue #382: Only add WHERE if there's actual content
+		// Skip WHERE if result is (1=1) or (1=0) from empty And{}/Or{}
+		whereBuf := &bytes.Buffer{}
+		whereArgs, whereErr := appendToSql(d.WhereParts, whereBuf, " AND ", nil)
+		if whereErr != nil {
+			err = whereErr
 			return
+		}
+		whereSQL := whereBuf.String()
+		// Skip WHERE for empty conjunctions (1=1) and (1=0)
+		if whereBuf.Len() > 0 && whereSQL != sqlTrue && whereSQL != sqlFalse {
+			sql.WriteString(" WHERE ")
+			sql.WriteString(whereSQL)
+			args = append(args, whereArgs...)
 		}
 	}
 

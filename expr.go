@@ -33,6 +33,12 @@ func (e expr) ToSql() (sql string, args []interface{}, err error) {
 	for _, arg := range e.args {
 		if _, ok := arg.(Sqlizer); ok {
 			simple = false
+			break
+		}
+		// Check if arg is a slice/array (but not []byte which should be treated as a single value)
+		if isListType(arg) {
+			simple = false
+			break
 		}
 	}
 	if simple {
@@ -65,6 +71,24 @@ func (e expr) ToSql() (sql string, args []interface{}, err error) {
 			buf.WriteString(sp[:i])
 			buf.WriteString(isql)
 			args = append(args, iargs...)
+		} else if isListType(ap[0]) {
+			// Fix for issue #383: Handle slice arguments
+			// Expand non-empty slices into (?, ?, ...)
+			valVal := reflect.ValueOf(ap[0])
+			if valVal.Len() == 0 {
+				// Empty slice - return error since "WHERE id IN ()" is invalid SQL
+				// Users should check for empty slices before building queries
+				err = fmt.Errorf("empty slice passed to Expr placeholder at position %d; use Eq{} for proper empty slice handling or check slice length before building query", len(args)+1)
+				return
+			}
+			buf.WriteString(sp[:i])
+			// Expand slice into (?, ?, ...)
+			buf.WriteString("(")
+			buf.WriteString(Placeholders(valVal.Len()))
+			buf.WriteString(")")
+			for j := 0; j < valVal.Len(); j++ {
+				args = append(args, valVal.Index(j).Interface())
+			}
 		} else {
 			// normal argument; append it and the placeholder
 			buf.WriteString(sp[:i+1])
@@ -367,6 +391,9 @@ func (gtOrEq GtOrEq) ToSql() (sql string, args []interface{}, err error) {
 type conj []Sqlizer
 
 func (c conj) join(sep, defaultExpr string) (sql string, args []interface{}, err error) {
+	// Fix for issue #382:
+	// - Empty/nil conjunctions return default expr (1=1 or 1=0) for safety
+	// - WHERE clause generation will skip if result is default expr
 	if len(c) == 0 {
 		return defaultExpr, []interface{}{}, nil
 	}
@@ -383,6 +410,10 @@ func (c conj) join(sep, defaultExpr string) (sql string, args []interface{}, err
 	}
 	if len(sqlParts) > 0 {
 		sql = fmt.Sprintf("(%s)", strings.Join(sqlParts, sep))
+	} else {
+		// All sqlizers returned empty - use default expression for safety
+		sql = defaultExpr
+		args = []interface{}{}
 	}
 	return
 }
@@ -399,6 +430,26 @@ type Or conj
 
 func (o Or) ToSql() (string, []interface{}, error) {
 	return conj(o).join(" OR ", sqlFalse)
+}
+
+// Not negates a Sqlizer, wrapping it in "NOT (...)"
+// Useful for creating NOR expressions and negating complex conditions.
+// Ex:
+//     .Where(Not(Or{Eq{"age": 20}, Eq{"owner": "a"}}))
+//     // produces: WHERE NOT ((age = ? OR owner = ?))
+type Not struct {
+	Sqlizer Sqlizer
+}
+
+func (n Not) ToSql() (string, []interface{}, error) {
+	sql, args, err := nestedToSql(n.Sqlizer)
+	if err != nil {
+		return "", nil, err
+	}
+	if sql == "" {
+		return "", args, nil
+	}
+	return fmt.Sprintf("NOT %s", sql), args, nil
 }
 
 func getSortedKeys(exp map[string]interface{}) []string {

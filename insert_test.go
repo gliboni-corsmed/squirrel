@@ -110,3 +110,62 @@ func TestInsertBuilderReplace(t *testing.T) {
 
 	assert.Equal(t, expectedSQL, sql)
 }
+
+func TestInsertOnDuplicateKeyUpdate(t *testing.T) {
+	// Test for issue #372 - ON DUPLICATE KEY UPDATE for MySQL upserts
+	b := Insert("users").
+		Columns("id", "name", "email").
+		Values(1, "John", "john@example.com").
+		OnDuplicateKeyUpdate(map[string]interface{}{
+			"name":  "John",
+			"email": "john@example.com",
+		})
+
+	sql, args, err := b.ToSql()
+	assert.NoError(t, err)
+
+	expectedSQL := "INSERT INTO users (id,name,email) VALUES (?,?,?) ON DUPLICATE KEY UPDATE email = ?, name = ?"
+	assert.Equal(t, expectedSQL, sql)
+
+	expectedArgs := []interface{}{1, "John", "john@example.com", "john@example.com", "John"}
+	assert.Equal(t, expectedArgs, args)
+}
+
+func TestInsertOnDuplicateKeyUpdateWithExpr(t *testing.T) {
+	// Test ON DUPLICATE KEY UPDATE with Expr for column references
+	b := Insert("counters").
+		Columns("id", "count").
+		Values(1, 1).
+		OnDuplicateKeyUpdate(map[string]interface{}{
+			"count": Expr("count + 1"),
+		})
+
+	sql, args, err := b.ToSql()
+	assert.NoError(t, err)
+
+	expectedSQL := "INSERT INTO counters (id,count) VALUES (?,?) ON DUPLICATE KEY UPDATE count = count + 1"
+	assert.Equal(t, expectedSQL, sql)
+
+	expectedArgs := []interface{}{1, 1}
+	assert.Equal(t, expectedArgs, args)
+}
+
+func TestInsertOnDuplicateKeyUpdateMultipleRows(t *testing.T) {
+	// Test ON DUPLICATE KEY UPDATE with multiple rows
+	b := Insert("users").
+		Columns("id", "name").
+		Values(1, "John").
+		Values(2, "Jane").
+		OnDuplicateKeyUpdate(map[string]interface{}{
+			"name": Expr("VALUES(name)"),
+		})
+
+	sql, args, err := b.ToSql()
+	assert.NoError(t, err)
+
+	expectedSQL := "INSERT INTO users (id,name) VALUES (?,?),(?,?) ON DUPLICATE KEY UPDATE name = VALUES(name)"
+	assert.Equal(t, expectedSQL, sql)
+
+	expectedArgs := []interface{}{1, "John", 2, "Jane"}
+	assert.Equal(t, expectedArgs, args)
+}

@@ -296,3 +296,58 @@ func (b InsertBuilder) Select(sb SelectBuilder) InsertBuilder {
 func (b InsertBuilder) statementKeyword(keyword string) InsertBuilder {
 	return builder.Set(b, "StatementKeyword", keyword).(InsertBuilder)
 }
+
+// OnDuplicateKeyUpdate adds MySQL's ON DUPLICATE KEY UPDATE clause to the INSERT statement.
+// This is useful for upsert operations in MySQL 8.
+// The updates parameter is a map of column names to values or Sqlizers.
+//
+// Example:
+//
+//	Insert("users").
+//	    Columns("id", "name", "email").
+//	    Values(1, "John", "john@example.com").
+//	    OnDuplicateKeyUpdate(map[string]interface{}{
+//	        "name": "John",
+//	        "email": "john@example.com",
+//	    })
+//
+// Generates: INSERT INTO users (id, name, email) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE name = ?, email = ?
+//
+// You can also use Expr for values that reference other columns:
+//
+//	OnDuplicateKeyUpdate(map[string]interface{}{
+//	    "count": Expr("count + 1"),
+//	})
+func (b InsertBuilder) OnDuplicateKeyUpdate(updates map[string]interface{}) InsertBuilder {
+	if len(updates) == 0 {
+		return b
+	}
+
+	// Build the ON DUPLICATE KEY UPDATE clause using Expr
+	// Sort keys for consistent output
+	keys := make([]string, 0, len(updates))
+	for k := range updates {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	var parts []interface{}
+	parts = append(parts, "ON DUPLICATE KEY UPDATE ")
+
+	for i, key := range keys {
+		if i > 0 {
+			parts = append(parts, ", ")
+		}
+		parts = append(parts, key)
+		parts = append(parts, " = ")
+
+		val := updates[key]
+		if sqlizer, ok := val.(Sqlizer); ok {
+			parts = append(parts, sqlizer)
+		} else {
+			parts = append(parts, Expr("?", val))
+		}
+	}
+
+	return b.SuffixExpr(ConcatExpr(parts...))
+}

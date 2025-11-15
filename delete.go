@@ -20,6 +20,7 @@ type deleteData struct {
 	Limit             string
 	Offset            string
 	Suffixes          []Sqlizer
+	AllowNoWhere      bool
 }
 
 func (d *deleteData) Exec() (sql.Result, error) {
@@ -57,12 +58,30 @@ func (d *deleteData) ToSql() (sqlStr string, args []interface{}, err error) {
 		}
 	}
 
+	hasWhere := false
 	if len(d.WhereParts) > 0 {
-		sql.WriteString(" WHERE ")
-		args, err = appendToSql(d.WhereParts, sql, " AND ", args)
-		if err != nil {
+		// Fix for issue #382: Only add WHERE if there's actual content
+		// Skip WHERE if result is (1=1) or (1=0) from empty And{}/Or{}
+		whereBuf := &bytes.Buffer{}
+		whereArgs, whereErr := appendToSql(d.WhereParts, whereBuf, " AND ", nil)
+		if whereErr != nil {
+			err = whereErr
 			return
 		}
+		whereSQL := whereBuf.String()
+		// Skip WHERE for empty conjunctions (1=1) and (1=0)
+		if whereBuf.Len() > 0 && whereSQL != sqlTrue && whereSQL != sqlFalse {
+			sql.WriteString(" WHERE ")
+			sql.WriteString(whereSQL)
+			args = append(args, whereArgs...)
+			hasWhere = true
+		}
+	}
+
+	// Require explicit opt-in for DELETE without WHERE to prevent accidental mass deletions
+	if !hasWhere && !d.AllowNoWhere {
+		err = fmt.Errorf("DELETE statement without WHERE clause requires explicit AllowNoWhere() call")
+		return
 	}
 
 	if len(d.OrderBys) > 0 {
@@ -160,6 +179,18 @@ func (b DeleteBuilder) From(from string) DeleteBuilder {
 // See SelectBuilder.Where for more information.
 func (b DeleteBuilder) Where(pred interface{}, args ...interface{}) DeleteBuilder {
 	return builder.Append(b, "WhereParts", newWherePart(pred, args...)).(DeleteBuilder)
+}
+
+// AllowNoWhere explicitly allows DELETE statements without a WHERE clause.
+// By default, DELETE statements without a WHERE clause will return an error
+// to prevent accidental mass deletions. Call this method to indicate that
+// deleting all rows is intentional.
+//
+// Example:
+//
+//	Delete("cache").AllowNoWhere().ToSql()
+func (b DeleteBuilder) AllowNoWhere() DeleteBuilder {
+	return builder.Set(b, "AllowNoWhere", true).(DeleteBuilder)
 }
 
 // OrderBy adds ORDER BY expressions to the query.
